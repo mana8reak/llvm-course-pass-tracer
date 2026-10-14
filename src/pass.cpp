@@ -3,6 +3,7 @@
 #include "llvm/Passes/PassBuilder.h"
 #include "llvm/Passes/PassPlugin.h"
 #include "llvm/Transforms/Utils/ModuleUtils.h"
+#include "llvm/IR/Verifier.h"
 #include <unordered_set>
 
 using namespace llvm;
@@ -67,7 +68,6 @@ struct UserOperandInstrumentationPass : public PassInfoMixin<UserOperandInstrume
                             builder.SetInsertPoint(UI);
                             Value *userOpVal = builder.getInt16(userOpId);
 
-                            // operand phi processing
                             if (auto *phi = dyn_cast<PHINode>(&I)) {
                                 std::unordered_set<Instruction*> incoming;
                                 std::unordered_set<PHINode*> resolved;
@@ -89,18 +89,20 @@ struct UserOperandInstrumentationPass : public PassInfoMixin<UserOperandInstrume
             }
         }
 
-        Function *ctor = Function::Create(
+        Function *registerOpcodes = Function::Create(
             FunctionType::get(Type::getVoidTy(Ctx), false),
             GlobalValue::InternalLinkage, "__reg_opcodes", M
         );
-        BasicBlock *bb = BasicBlock::Create(Ctx, "", ctor);
+        BasicBlock *bb = BasicBlock::Create(Ctx, "", registerOpcodes);
         builder.SetInsertPoint(bb);
         for (auto &[id, name]: instrNames) {
             builder.CreateCall(regFunc, {builder.getInt16(id), builder.CreateGlobalStringPtr(name)});
         }
         builder.CreateRetVoid();
-        appendToGlobalCtors(M, ctor, 0);
+        appendToGlobalCtors(M, registerOpcodes, 0);
 
+        bool verif = verifyModule(M);
+        outs() << "[Verification] " << (verif ? "FAIL\n\n" : "OK\n\n");
         outs() << "[Instrumentation] Inserted " << insertions << " logging calls.\n";
         return PreservedAnalyses::none();
     }
